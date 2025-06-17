@@ -55,11 +55,14 @@ This application is configured for deployment on Render:
 1. Create a new Web Service on Render
 2. Link your GitHub repository
 3. Use the following settings:
-   - Build Command: `pip install -r requirements.txt`
+   - Build Command: `chmod +x build.sh && ./build.sh`
    - Start Command: `gunicorn --worker-class eventlet -w 1 app:app`
    - Environment Variables:
      - `SECRET_KEY`: Your secure secret key
      - `ENVIRONMENT`: production
+   - Advanced Settings:
+     - Runtime Environment: Ubuntu
+     - Choose a plan that supports custom Ubuntu packages (e.g., Standard)
 
 ## Project Structure
 
@@ -68,6 +71,8 @@ doc-easy/
 │
 ├── app.py                 # Main application file
 ├── requirements.txt       # Python dependencies
+├── build.sh               # Build script for Render deployment
+├── render.yaml            # Render deployment configuration
 │
 ├── static/                # Static assets
 │   └── js/
