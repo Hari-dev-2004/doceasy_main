@@ -26,13 +26,20 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
-# Initialize SocketIO with simpler config
+# Initialize SocketIO with optimized settings for WebRTC
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*",
     logger=True,
     engineio_logger=True,
-    async_mode='threading'  # Use threading mode for better compatibility
+    async_mode='threading',  # Use threading mode for better compatibility
+    ping_timeout=60,         # Longer timeout for better connection stability
+    ping_interval=25,        # More frequent pings to keep connections alive
+    manage_session=False,    # Don't let SocketIO manage sessions
+    reconnection=True,       # Enable automatic reconnection
+    reconnection_delay=1000, # Start with 1s delay between reconnection attempts
+    reconnection_delay_max=5000, # Maximum delay between reconnection attempts
+    randomization_factor=0.5 # Add randomization to reconnection attempts
 )
 CORS(app)
 
@@ -69,6 +76,31 @@ class Participant(db.Model):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/debug/<room_id>')
+def debug_room(room_id):
+    try:
+        # Check if user is authenticated
+        if 'user_id' not in session:
+            logger.warning("User not in session, redirecting to index")
+            return redirect(url_for('index'))
+        
+        # Get room data
+        room = Room.query.get(room_id)
+        if not room:
+            logger.warning(f"Room {room_id} not found, redirecting to index")
+            return redirect(url_for('index'))
+        
+        # Get participants
+        participants = Participant.query.filter_by(room_id=room_id).all()
+        
+        return render_template('debug.html', 
+                              room=room.to_dict(), 
+                              participants=[p.to_dict() for p in participants],
+                              current_user={"id": session['user_id'], "name": session['user_name']})
+    except Exception as e:
+        logger.error(f"Error accessing debug page for room {room_id}: {str(e)}")
+        return redirect(url_for('index'))
 
 @app.route('/create-room', methods=['POST'])
 def create_room():
@@ -177,6 +209,8 @@ def handle_connect():
     if user_id:
         join_room(user_id)
         logger.info(f"User {user_id} connected")
+    else:
+        logger.warning("User connected without ID in session")
 
 @socketio.on('join')
 def handle_join(data):
@@ -184,14 +218,42 @@ def handle_join(data):
     user_id = session.get('user_id')
     user_name = session.get('user_name')
     
+    if not room_id:
+        room_id = session.get('room_id')
+        logger.info(f"Using room ID from session: {room_id}")
+    
     if room_id and user_id:
+        # Join the room to receive messages
         join_room(room_id)
+        
+        # Get all participants in the room
+        participants = Participant.query.filter_by(room_id=room_id).all()
+        
+        # Send join notification to everyone in the room
         emit('user-joined', {
             'user_id': user_id,
             'user_name': user_name
         }, room=room_id, include_self=False)
         
-        logger.info(f"User {user_id} joined room {room_id}")
+        logger.info(f"User {user_id} ({user_name}) joined room {room_id} with {len(participants)} participants")
+        
+        # Make sure user is in participants list
+        existing_participant = Participant.query.filter_by(room_id=room_id, id=user_id).first()
+        if not existing_participant and user_id and user_name:
+            try:
+                new_participant = Participant(
+                    id=user_id,
+                    name=user_name,
+                    room_id=room_id
+                )
+                db.session.add(new_participant)
+                db.session.commit()
+                logger.info(f"Added user {user_id} to room {room_id} participants")
+            except Exception as e:
+                logger.error(f"Error adding participant: {str(e)}")
+                db.session.rollback()
+    else:
+        logger.error(f"Missing data for join: room_id={room_id}, user_id={user_id}")
 
 @socketio.on('leave')
 def handle_leave(data):
@@ -213,11 +275,31 @@ def handle_signal(data):
     signal_data = data.get('signal')
     
     if target_id and user_id and signal_data:
+        logger.debug(f"Signal type: {signal_data.get('type') if isinstance(signal_data, dict) else 'unknown'}")
+        
+        # Forward the signal to the target user
         emit('signal', {
             'user_id': user_id,
             'signal': signal_data
         }, room=target_id)
+        
         logger.info(f"Signal sent from {user_id} to {target_id}")
+    else:
+        logger.error(f"Invalid signal data: target={target_id}, user_id={user_id}, has_signal_data={signal_data is not None}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    user_id = session.get('user_id')
+    room_id = session.get('room_id')
+    
+    if user_id and room_id:
+        emit('user-left', {
+            'user_id': user_id
+        }, room=room_id, include_self=False)
+        
+        logger.info(f"User {user_id} disconnected from room {room_id}")
+    else:
+        logger.info("Anonymous user disconnected")
 
 # Create database tables
 with app.app_context():

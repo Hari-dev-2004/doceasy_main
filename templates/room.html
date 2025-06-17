@@ -17,6 +17,9 @@
     <div class="px-3 py-1 bg-gray-700 rounded text-sm">
         Meeting ID: <span id="roomIdDisplay">{{ room.id }}</span>
     </div>
+    <a href="/debug/{{ room.id }}" class="px-3 py-1 bg-blue-800 hover:bg-blue-900 rounded text-sm">
+        Debug Mode
+    </a>
 </div>
 {% endblock %}
 
