@@ -35,7 +35,13 @@ function createPeer(initiator, userId) {
         initiator: initiator,
         stream: localStream,
         trickle: true,
-        config: iceServers
+        config: iceServers,
+        reconnectTimer: 1000,
+        iceTransportPolicy: 'all',
+        sdpTransform: (sdp) => {
+            // Set high priority for audio to improve call quality
+            return sdp.replace('a=group:BUNDLE 0 1', 'a=group:BUNDLE 1 0');
+        }
     });
 
     // Handle signals
@@ -72,8 +78,15 @@ function initWebRTC(roomId, userId, userName) {
     loadSimplePeerScript().then(() => {
         localVideo = document.getElementById('localVideo');
         
-        // Connect to socket.io server
-        socket = io.connect();
+            // Connect to socket.io server with reliability options
+    socket = io.connect({
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        transports: ['websocket', 'polling']
+    });
         
         socket.on('connect', () => {
             console.log('Connected to socket.io server');

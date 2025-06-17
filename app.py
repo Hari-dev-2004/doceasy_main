@@ -11,7 +11,10 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Initialize Flask app
@@ -23,7 +26,16 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    ping_timeout=60,
+    ping_interval=25,
+    manage_session=False,
+    logger=True,
+    engineio_logger=True
+)
 CORS(app)
 
 # Define models
@@ -112,19 +124,43 @@ def join_room_endpoint():
 
 @app.route('/room/<room_id>')
 def room(room_id):
-    if 'user_id' not in session:
+    try:
+        # Check if user is authenticated
+        if 'user_id' not in session:
+            logger.warning("User not in session, redirecting to index")
+            return redirect(url_for('index'))
+        
+        # Get room data
+        room = Room.query.get(room_id)
+        if not room:
+            logger.warning(f"Room {room_id} not found, redirecting to index")
+            return redirect(url_for('index'))
+        
+        # Get participants
+        participants = Participant.query.filter_by(room_id=room_id).all()
+        
+        # If current user is not in participants, add them
+        participant_ids = [p.id for p in participants]
+        if session['user_id'] not in participant_ids:
+            logger.info(f"Adding user {session['user_id']} to room {room_id}")
+            participant = Participant(
+                id=session['user_id'], 
+                name=session['user_name'], 
+                room_id=room_id
+            )
+            db.session.add(participant)
+            db.session.commit()
+            participants = Participant.query.filter_by(room_id=room_id).all()
+        
+        logger.info(f"User {session['user_id']} joined room {room_id} with {len(participants)} participants")
+        
+        return render_template('room.html', 
+                              room=room.to_dict(), 
+                              participants=[p.to_dict() for p in participants],
+                              current_user={"id": session['user_id'], "name": session['user_name']})
+    except Exception as e:
+        logger.error(f"Error accessing room {room_id}: {str(e)}")
         return redirect(url_for('index'))
-    
-    room = Room.query.get(room_id)
-    if not room:
-        return redirect(url_for('index'))
-    
-    participants = Participant.query.filter_by(room_id=room_id).all()
-    
-    return render_template('room.html', 
-                          room=room.to_dict(), 
-                          participants=[p.to_dict() for p in participants],
-                          current_user={"id": session['user_id'], "name": session['user_name']})
 
 @app.route('/api/rooms')
 def get_rooms():

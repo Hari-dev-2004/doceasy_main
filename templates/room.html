@@ -75,9 +75,40 @@ document.addEventListener('DOMContentLoaded', function() {
     const userId = document.querySelector('meta[name="user-id"]').getAttribute('content');
     const userName = document.querySelector('meta[name="user-name"]').getAttribute('content');
     
-    // Initialize WebRTC with SimplePeer
-    initWebRTC(roomId, userId, userName);
+    // Show connection status message
+    function showConnectionStatus(message, isError = false) {
+        const statusDiv = document.createElement('div');
+        statusDiv.className = `fixed top-4 right-4 p-4 rounded-lg z-50 ${isError ? 'bg-red-600' : 'bg-green-600'} text-white`;
+        statusDiv.textContent = message;
+        document.body.appendChild(statusDiv);
+        
+        setTimeout(() => {
+            statusDiv.style.opacity = '0';
+            statusDiv.style.transition = 'opacity 0.5s';
+            setTimeout(() => statusDiv.remove(), 500);
+        }, 3000);
+    }
     
+    // Add error handler for socket connection
+    window.addEventListener('error', function(e) {
+        if (e.message && e.message.includes('WebSocket')) {
+            showConnectionStatus('Connection error. Attempting to reconnect...', true);
+            
+            // Try to reload after a delay if socket connection fails
+            setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+        }
+    });
+    
+    // Initialize WebRTC with SimplePeer
+    try {
+        initWebRTC(roomId, userId, userName);
+        showConnectionStatus('Connecting to room...');
+    } catch (err) {
+        console.error('Error initializing WebRTC:', err);
+        showConnectionStatus('Failed to initialize video call', true);
+    }
     // Copy meeting link button
     document.getElementById('copyLinkBtn').addEventListener('click', function() {
         const url = window.location.href;
