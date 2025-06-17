@@ -29,28 +29,87 @@ let isScreenSharing = false;
 let isAudioEnabled = true;
 let isVideoEnabled = true;
 
+// Simple-peer for WebRTC handling
+function createPeer(initiator, userId) {
+    const peer = new SimplePeer({
+        initiator: initiator,
+        stream: localStream,
+        trickle: true,
+        config: iceServers
+    });
+
+    // Handle signals
+    peer.on('signal', data => {
+        socket.emit('signal', {
+            target: userId,
+            signal: data
+        });
+    });
+
+    // Handle incoming stream
+    peer.on('stream', stream => {
+        createRemoteVideo(userId, stream);
+    });
+
+    // Handle errors
+    peer.on('error', err => {
+        console.error('Peer error:', err);
+    });
+
+    // Handle close
+    peer.on('close', () => {
+        console.log('Peer connection closed with', userId);
+        if (peerConnections[userId]) {
+            delete peerConnections[userId];
+        }
+    });
+
+    return peer;
+}
+
 // Initialize WebRTC
 function initWebRTC(roomId, userId, userName) {
-    localVideo = document.getElementById('localVideo');
-    
-    // Connect to socket.io server
-    socket = io.connect();
-    
-    socket.on('connect', () => {
-        console.log('Connected to socket.io server');
+    loadSimplePeerScript().then(() => {
+        localVideo = document.getElementById('localVideo');
         
-        // Join the room
-        socket.emit('join', { room_id: roomId });
+        // Connect to socket.io server
+        socket = io.connect();
         
-        // Setup event listeners
-        setupSocketListeners(roomId, userId, userName);
+        socket.on('connect', () => {
+            console.log('Connected to socket.io server');
+            
+            // Join the room
+            socket.emit('join', { room_id: roomId });
+            
+            // Setup event listeners
+            setupSocketListeners(roomId, userId, userName);
+            
+            // Start local video
+            initLocalStream();
+        });
         
-        // Start local video
-        initLocalStream();
+        // Set up control buttons
+        setupControlButtons();
+    }).catch(err => {
+        console.error('Error loading SimplePeer:', err);
     });
-    
-    // Set up control buttons
-    setupControlButtons();
+}
+
+// Load SimplePeer script dynamically
+function loadSimplePeerScript() {
+    return new Promise((resolve, reject) => {
+        if (window.SimplePeer) {
+            resolve();
+            return;
+        }
+
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/simple-peer@9/simplepeer.min.js';
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = reject;
+        document.head.appendChild(script);
+    });
 }
 
 // Initialize local media stream
@@ -74,82 +133,26 @@ function setupSocketListeners(roomId, userId, userName) {
         // Update participant list
         addParticipantToList(data.user_id, data.user_name);
         
-        // Create peer connection for the new user
-        const peerConnection = createPeerConnection(data.user_id);
-        
-        // Add local stream to peer connection
-        localStream.getTracks().forEach(track => {
-            peerConnection.addTrack(track, localStream);
-        });
-        
-        // Create and send offer
+        // Create peer connection as initiator
+        const peer = createPeer(true, data.user_id);
+        peerConnections[data.user_id] = peer;
+    });
+    
+    // When receiving a signal
+    socket.on('signal', data => {
+        const fromUserId = data.user_id;
+        const signal = data.signal;
+
+        // If we don't have a connection to this user yet, create one as non-initiator
+        if (!peerConnections[fromUserId]) {
+            peerConnections[fromUserId] = createPeer(false, fromUserId);
+        }
+
+        // Signal the peer
         try {
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-            
-            // Send offer to the new user
-            sendOffer(data.user_id, peerConnection.localDescription);
+            peerConnections[fromUserId].signal(signal);
         } catch (e) {
-            console.error('Error creating offer:', e);
-        }
-    });
-    
-    // When receiving an offer
-    socket.on('offer', async (data) => {
-        console.log('Received offer from:', data.from);
-        
-        // Create peer connection if it doesn't exist
-        if (!peerConnections[data.from]) {
-            peerConnections[data.from] = createPeerConnection(data.from);
-            
-            // Add local stream to peer connection
-            localStream.getTracks().forEach(track => {
-                peerConnections[data.from].addTrack(track, localStream);
-            });
-        }
-        
-        const peerConnection = peerConnections[data.from];
-        
-        try {
-            // Set remote description (the offer)
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-            
-            // Create answer
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            
-            // Send answer
-            sendAnswer(data.from, peerConnection.localDescription);
-        } catch (e) {
-            console.error('Error handling offer:', e);
-        }
-    });
-    
-    // When receiving an answer
-    socket.on('answer', async (data) => {
-        console.log('Received answer from:', data.from);
-        
-        const peerConnection = peerConnections[data.from];
-        if (peerConnection) {
-            try {
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-            } catch (e) {
-                console.error('Error handling answer:', e);
-            }
-        }
-    });
-    
-    // When receiving ICE candidates
-    socket.on('ice-candidate', async (data) => {
-        console.log('Received ICE candidate from:', data.from);
-        
-        const peerConnection = peerConnections[data.from];
-        if (peerConnection) {
-            try {
-                await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-            } catch (e) {
-                console.error('Error adding ICE candidate:', e);
-            }
+            console.error('Error signaling peer:', e);
         }
     });
     
@@ -168,66 +171,10 @@ function setupSocketListeners(roomId, userId, userName) {
         
         // Close peer connection
         if (peerConnections[data.user_id]) {
-            peerConnections[data.user_id].close();
+            peerConnections[data.user_id].destroy();
             delete peerConnections[data.user_id];
         }
     });
-}
-
-// Create RTCPeerConnection
-function createPeerConnection(userId) {
-    const peerConnection = new RTCPeerConnection(iceServers);
-    
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            sendIceCandidate(userId, event.candidate);
-        }
-    };
-    
-    peerConnection.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-            createRemoteVideo(userId, event.streams[0]);
-        }
-    };
-    
-    peerConnections[userId] = peerConnection;
-    return peerConnection;
-}
-
-// Send offer to peer
-function sendOffer(userId, offer) {
-    fetch('/api/offer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            target: userId,
-            offer: offer
-        })
-    }).catch(e => console.error('Error sending offer:', e));
-}
-
-// Send answer to peer
-function sendAnswer(userId, answer) {
-    fetch('/api/answer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            target: userId,
-            answer: answer
-        })
-    }).catch(e => console.error('Error sending answer:', e));
-}
-
-// Send ICE candidate to peer
-function sendIceCandidate(userId, candidate) {
-    fetch('/api/ice-candidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            target: userId,
-            candidate: candidate
-        })
-    }).catch(e => console.error('Error sending ICE candidate:', e));
 }
 
 // Create video element for remote peer
@@ -362,13 +309,11 @@ function setupControlButtons() {
                     
                     // Replace track in all peer connections
                     for (const userId in peerConnections) {
-                        const sender = peerConnections[userId]
-                            .getSenders()
-                            .find(s => s.track && s.track.kind === 'video');
-                            
-                        if (sender) {
-                            sender.replaceTrack(videoTrack);
-                        }
+                        peerConnections[userId].replaceTrack(
+                            localStream.getVideoTracks()[0],
+                            videoTrack,
+                            localStream
+                        );
                     }
                     
                     // Show screen share in local video
@@ -406,12 +351,12 @@ function stopScreenSharing() {
         if (videoTrack) {
             // Replace track in all peer connections
             for (const userId in peerConnections) {
-                const sender = peerConnections[userId]
-                    .getSenders()
-                    .find(s => s.track && s.track.kind === 'video');
-                    
-                if (sender) {
-                    sender.replaceTrack(videoTrack);
+                if (peerConnections[userId].replaceTrack) {
+                    const senders = peerConnections[userId].getSenders();
+                    const sender = senders.find(s => s.track && s.track.kind === 'video');
+                    if (sender) {
+                        sender.replaceTrack(videoTrack);
+                    }
                 }
             }
             

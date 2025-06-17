@@ -4,7 +4,6 @@ flask-migrate==4.0.4
 flask-socketio==5.3.4
 flask-cors==4.0.0
 python-dotenv==1.0.0
-aiortc==1.5.0
-aiohttp==3.8.5
 gunicorn==21.2.0
-eventlet==0.33.3 
+eventlet==0.33.3
+pyOpenSSL==23.2.0 

@@ -15,7 +15,7 @@ A simple video call application similar to Google Meet built with Flask, WebRTC 
 - **Frontend**: HTML, TailwindCSS, JavaScript
 - **Backend**: Flask (Python)
 - **Database**: SQLite
-- **WebRTC**: aiortc (Python WebRTC library)
+- **WebRTC**: SimplePeer.js (Browser WebRTC)
 - **Real-time Communication**: Flask-SocketIO
 
 ## Installation
@@ -55,14 +55,13 @@ This application is configured for deployment on Render:
 1. Create a new Web Service on Render
 2. Link your GitHub repository
 3. Use the following settings:
-   - Build Command: `chmod +x build.sh && ./build.sh`
+   - Build Command: `pip install -r requirements.txt`
    - Start Command: `gunicorn --worker-class eventlet -w 1 app:app`
    - Environment Variables:
      - `SECRET_KEY`: Your secure secret key
      - `ENVIRONMENT`: production
-   - Advanced Settings:
-     - Runtime Environment: Ubuntu
-     - Choose a plan that supports custom Ubuntu packages (e.g., Standard)
+
+Alternatively, use the provided `render.yaml` file for Blueprint deployment.
 
 ## Project Structure
 

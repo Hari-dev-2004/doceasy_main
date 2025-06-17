@@ -1,22 +1,14 @@
 import os
 import json
 import uuid
-import asyncio
 import logging
-from pathlib import Path
 from datetime import datetime
-from threading import Thread
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
-
-import ssl
-from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack, RTCIceCandidate
-from aiortc.contrib.media import MediaRelay
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,11 +25,6 @@ db = SQLAlchemy(app)
 migrate = Migrate(app, db)
 socketio = SocketIO(app, cors_allowed_origins="*")
 CORS(app)
-
-# WebRTC setup
-relay = MediaRelay()
-peer_connections = {}
-ice_candidates = {}
 
 # Define models
 class Room(db.Model):
@@ -67,14 +54,6 @@ class Participant(db.Model):
             'room_id': self.room_id,
             'joined_at': self.joined_at.isoformat()
         }
-
-# WebRTC signaling handlers
-async def process_offer(pc, offer, user_id, room_id):
-    await pc.setRemoteDescription(RTCSessionDescription(sdp=offer["sdp"], type=offer["type"]))
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    
-    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
 # Flask routes
 @app.route('/')
@@ -157,59 +136,6 @@ def get_participants(room_id):
     participants = Participant.query.filter_by(room_id=room_id).all()
     return jsonify([participant.to_dict() for participant in participants])
 
-# WebRTC signaling endpoints
-@app.route('/api/offer', methods=['POST'])
-def handle_offer():
-    data = request.json
-    offer = data.get('offer')
-    target_id = data.get('target')
-    user_id = session.get('user_id')
-    room_id = session.get('room_id')
-    
-    if not offer or not target_id or not user_id or not room_id:
-        return jsonify({"error": "Invalid request"}), 400
-    
-    socketio.emit('offer', {
-        'offer': offer,
-        'from': user_id
-    }, room=target_id)
-    
-    return jsonify({"success": True})
-
-@app.route('/api/answer', methods=['POST'])
-def handle_answer():
-    data = request.json
-    answer = data.get('answer')
-    target_id = data.get('target')
-    user_id = session.get('user_id')
-    
-    if not answer or not target_id or not user_id:
-        return jsonify({"error": "Invalid request"}), 400
-    
-    socketio.emit('answer', {
-        'answer': answer,
-        'from': user_id
-    }, room=target_id)
-    
-    return jsonify({"success": True})
-
-@app.route('/api/ice-candidate', methods=['POST'])
-def handle_ice_candidate():
-    data = request.json
-    candidate = data.get('candidate')
-    target_id = data.get('target')
-    user_id = session.get('user_id')
-    
-    if not candidate or not target_id or not user_id:
-        return jsonify({"error": "Invalid request"}), 400
-    
-    socketio.emit('ice-candidate', {
-        'candidate': candidate,
-        'from': user_id
-    }, room=target_id)
-    
-    return jsonify({"success": True})
-
 # Socket.IO events
 @socketio.on('connect')
 def handle_connect():
@@ -246,11 +172,24 @@ def handle_leave(data):
         leave_room(room_id)
         logger.info(f"User {user_id} left room {room_id}")
 
+@socketio.on('signal')
+def handle_signal(data):
+    target_id = data.get('target')
+    user_id = session.get('user_id')
+    signal_data = data.get('signal')
+    
+    if target_id and user_id and signal_data:
+        emit('signal', {
+            'user_id': user_id,
+            'signal': signal_data
+        }, room=target_id)
+        logger.info(f"Signal sent from {user_id} to {target_id}")
+
 # Create database tables
 with app.app_context():
     db.create_all()
 
-# Start the server with SSL if in production
+# Start the server
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     if os.environ.get('ENVIRONMENT') == 'production':

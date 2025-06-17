@@ -75,7 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const userId = document.querySelector('meta[name="user-id"]').getAttribute('content');
     const userName = document.querySelector('meta[name="user-name"]').getAttribute('content');
     
-    // Initialize WebRTC
+    // Initialize WebRTC with SimplePeer
     initWebRTC(roomId, userId, userName);
     
     // Copy meeting link button
