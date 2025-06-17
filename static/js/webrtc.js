@@ -78,15 +78,8 @@ function initWebRTC(roomId, userId, userName) {
     loadSimplePeerScript().then(() => {
         localVideo = document.getElementById('localVideo');
         
-            // Connect to socket.io server with reliability options
-    socket = io.connect({
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        timeout: 20000,
-        transports: ['websocket']
-    });
+            // Connect to socket.io server with basic config
+    socket = io.connect();
         
         socket.on('connect', () => {
             console.log('Connected to socket.io server');

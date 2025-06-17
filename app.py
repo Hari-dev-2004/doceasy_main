@@ -26,15 +26,13 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
-# Initialize SocketIO with more compatible settings
+# Initialize SocketIO with simpler config
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*",
-    ping_timeout=60,
-    ping_interval=25,
-    manage_session=False,
     logger=True,
-    engineio_logger=True
+    engineio_logger=True,
+    async_mode='threading'  # Use threading mode for better compatibility
 )
 CORS(app)
 
@@ -225,10 +223,11 @@ def handle_signal(data):
 with app.app_context():
     db.create_all()
 
-# Start the server
+# Start the server - only used for local development
+# For production, we use gunicorn with the wsgi.py file
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     if os.environ.get('ENVIRONMENT') == 'production':
-        socketio.run(app, host='0.0.0.0', port=port, ssl_context='adhoc')
+        socketio.run(app, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
     else:
-        socketio.run(app, host='0.0.0.0', port=port, debug=True) 
+        socketio.run(app, host='0.0.0.0', port=port, debug=True, allow_unsafe_werkzeug=True) 
