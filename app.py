@@ -26,10 +26,10 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 # Initialize extensions
 db = SQLAlchemy(app)
 migrate = Migrate(app, db)
+# Initialize SocketIO with more compatible settings
 socketio = SocketIO(
     app, 
     cors_allowed_origins="*",
-    async_mode='eventlet',
     ping_timeout=60,
     ping_interval=25,
     manage_session=False,

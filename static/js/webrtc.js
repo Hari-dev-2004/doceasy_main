@@ -85,7 +85,7 @@ function initWebRTC(roomId, userId, userName) {
         reconnectionDelay: 1000,
         reconnectionDelayMax: 5000,
         timeout: 20000,
-        transports: ['websocket', 'polling']
+        transports: ['websocket']
     });
         
         socket.on('connect', () => {
